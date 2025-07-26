@@ -1,3 +1,19 @@
+"""
+File: dataset.py
+Author: Juan Montesinos
+Created: 26/07/2025
+
+Description:
+    Photoplethysmograph (PPG) dataset for regression challenge.
+    Base class for PyTorch Dataset, handling time-series data with additional features.
+Usage:
+    import dataset in your training script.
+
+Copyright: (c) 2025, Juan Montesinos. All rights reserved.
+"""
+
+import json
+
 import numpy as np
 import polars as pl
 import torch
@@ -40,7 +56,6 @@ class BaseDataset(Dataset):
         test_size: float = 0.2,
         device="cpu",
     ):
-        # Load data
         train_data = pl.read_csv(C.TRAIN_PATH)
         labels_np = pl.read_csv(C.LABELS_PATH).to_numpy()[:, 0]
 
@@ -76,7 +91,51 @@ class BaseDataset(Dataset):
         return len(self.labels)
 
     def __getitem__(self, idx: int):
-        x_ts = (self.ts_arr[idx] - self.mean) / self.std
+        x_ts = self.ts_arr[idx] 
         x_feats = self.feats[idx]
         y = self.labels[idx]
         return x_ts, x_feats, y
+
+
+class TestDataset(Dataset):
+    """
+    PyTorch Dataset for inference on the unlabeled test set.
+    Applies same preprocessing and normalization as training.
+    """
+
+    def __init__(
+        self,
+        csv_path: str,
+        stats_path: str,
+        filtered: bool = True,
+        device: str = "cpu",
+    ):
+        # Load test data
+        df = pl.read_csv(csv_path)
+        ts_np = df[C.ts_columns].to_numpy()  # N x TS_length
+        feats_np = df[C.feats_columns].to_numpy()  # N x num_feats
+
+        # Optional high-pass filter
+        if filtered:
+            ts_np = np.stack([highpass_filter_ppg(x, fs=C.SR) for x in ts_np])
+
+        # Load normalization stats
+        with open(stats_path, "r") as f:
+            stats = json.load(f)
+        mean = stats["data_mean"]
+        std = stats["data_std"]
+        self.mean_labels = stats["labels_mean"]
+        self.std_labels = stats["labels_std"]
+
+        # Normalize
+        ts_norm = (ts_np - mean) / std
+
+        # Convert to tensors
+        self.ts = torch.from_numpy(ts_norm).float().to(device)
+        self.feats = torch.from_numpy(feats_np).float().to(device)
+
+    def __len__(self):
+        return len(self.ts)
+
+    def __getitem__(self, idx):
+        return self.ts[idx], self.feats[idx]

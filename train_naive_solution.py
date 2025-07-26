@@ -1,12 +1,26 @@
+"""
+File: train_naive_solution.py
+Author: Juan Montesinos
+Created: 26/07/2025
+
+Description:
+    Photoplethysmograph (PPG) training script.
+Usage:
+    uv run train_naive_solution.py
+
+Copyright: (c) 2025, Juan Montesinos. All rights reserved.
+"""
+
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
 import os
+import json
 import shutil
 import matplotlib.pyplot as plt
 
 torch.set_float32_matmul_precision("high")
-import dataset  # your existing dataset module
+import dataset
 
 
 def conv_block(
@@ -90,101 +104,115 @@ class Model(nn.Module):
         return out[:, 0]
 
 
-# Device
+# USER PARAMS
+# =================================================================================
 DEVICE = "cuda"
 BATCH_SIZE = 32
-# Datasets and loaders
-train_ds = dataset.BaseDataset(train=True, device=DEVICE)
-val_ds = dataset.BaseDataset(train=False, device=DEVICE)
-train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
-val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
+# =================================================================================
+if __name__ == "__main__":
 
-# Model, loss, optimizer
-model = torch.compile(Model().to(DEVICE))
-criterion = nn.SmoothL1Loss()
-optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+    train_ds = dataset.BaseDataset(train=True, device=DEVICE)
+    val_ds = dataset.BaseDataset(train=False, device=DEVICE)
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
 
-# Scheduler: halve LR every epoch
-scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.8)
+    # Model, loss, optimizer
+    model = torch.compile(Model().to(DEVICE))
+    criterion = nn.SmoothL1Loss()
+    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
 
-# Training directory
-train_dir = "training"
-if os.path.exists(train_dir):
-    shutil.rmtree(train_dir)
-os.makedirs(train_dir, exist_ok=True)
+    # Scheduler: halve LR every epoch
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.8)
 
-best_val_loss = float("inf")
-train_losses = []
-val_losses = []
+    # Training directory
+    train_dir = "training"
+    if os.path.exists(train_dir):
+        shutil.rmtree(train_dir)
+    os.makedirs(train_dir, exist_ok=True)
 
-num_epochs = 10
-for epoch in range(1, num_epochs + 1):
-    model.train()
-    for i, (ts, feats, gt) in enumerate(train_loader, 1):
-        preds = model(ts, feats)
-        loss = criterion(preds, gt)
+    best_val_loss = float("inf")
+    train_losses = []
+    val_losses = []
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        train_losses.append(loss.item())
-        if i % 100 == 0:
-            print(f"Epoch {epoch} Iter {i}/{len(train_loader)} - Train Loss: {loss.item():.3f}")
-
-    # Step the scheduler at epoch end
-    scheduler.step()
-    current_lr = optimizer.param_groups[0]["lr"]
-    print(f"Epoch {epoch} - learning rate now {current_lr:.6f}")
-
-    # Validation
-    model.eval()
-    val_running = 0.0
-    val_unnormalized = 0.0
-    with torch.no_grad():
-        for i, (ts, feats, gt) in enumerate(val_loader, 1):
-            ts, feats, gt = ts.to(DEVICE), feats.to(DEVICE), gt.to(DEVICE)
+    num_epochs = 10
+    for epoch in range(1, num_epochs + 1):
+        model.train()
+        for i, (ts, feats, gt) in enumerate(train_loader, 1):
             preds = model(ts, feats)
-            v_loss = criterion(preds, gt)
-            val_running += v_loss.item()
-            # un-normalize to original scale
-            preds = preds * train_ds.std_labels + train_ds.mean_labels
-            gt = gt * train_ds.std_labels + train_ds.mean_labels
+            loss = criterion(preds, gt)
 
-            v_loss_un = (preds - gt).abs().mean()
-            val_unnormalized += v_loss_un.item()
-            if i % 25 == 0:
-                print(
-                    f"Epoch {epoch} Val Iter {i}/{len(val_loader)} - Val L1: {v_loss.item():.3f}, Val Unnormalized L1: {v_loss_un.item():.3f}"
-                )
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-    avg_val_loss = val_running / len(val_loader)
-    val_losses.append(avg_val_loss)
+            train_losses.append(loss.item())
+            if i % 100 == 0:
+                print(f"Epoch {epoch} Iter {i}/{len(train_loader)} - Train Loss: {loss.item():.3f}")
+
+        # Step the scheduler at epoch end
+        scheduler.step()
+        current_lr = optimizer.param_groups[0]["lr"]
+        print(f"Epoch {epoch} - learning rate now {current_lr:.6f}")
+
+        # Validation
+        model.eval()
+        val_running = 0.0
+        val_unnormalized = 0.0
+        with torch.no_grad():
+            for i, (ts, feats, gt) in enumerate(val_loader, 1):
+                ts, feats, gt = ts.to(DEVICE), feats.to(DEVICE), gt.to(DEVICE)
+                preds = model(ts, feats)
+                v_loss = criterion(preds, gt)
+                val_running += v_loss.item()
+                # un-normalize to original scale
+                preds = preds * train_ds.std_labels + train_ds.mean_labels
+                gt = gt * train_ds.std_labels + train_ds.mean_labels
+
+                v_loss_un = (preds - gt).abs().mean()
+                val_unnormalized += v_loss_un.item()
+                if i % 25 == 0:
+                    print(
+                        f"Epoch {epoch} Val Iter {i}/{len(val_loader)} - Val L1: {v_loss.item():.3f}, Val Unnormalized L1: {v_loss_un.item():.3f}"
+                    )
+
+        avg_val_loss = val_running / len(val_loader)
+        avg_val_unnormalized = val_unnormalized / len(val_loader)
+        val_losses.append(avg_val_loss)
+        print(
+            f"Epoch {epoch} - Avg Val L1: {avg_val_loss:.3f}, Avg Val Unnormalized L1: {val_unnormalized / len(val_loader):.3f}"
+        )
+
+        # Save best model
+        if avg_val_unnormalized < best_val_loss:
+            best_val_loss = avg_val_unnormalized
+            torch.save(model.state_dict(), os.path.join(train_dir, "best_model.pth"))
+
+    # Plot loss curves
+    plt.figure()
+    plt.plot(train_losses, label="Train Loss")
+    plt.plot(
+        [i * len(train_loader) for i in range(1, num_epochs + 1)],
+        val_losses,
+        label="Val Loss",
+        marker="o",
+    )
+    plt.xlabel("Iterations")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.title("Loss Curves")
+    plt.savefig(os.path.join(train_dir, "loss_curve.png"))
+    plt.close()
+
     print(
-        f"Epoch {epoch} - Avg Val L1: {avg_val_loss:.3f}, Avg Val Unnormalized L1: {val_unnormalized / len(val_loader):.3f}"
+        f"Training complete. Best Val Loss: {best_val_loss:.3f}, Best Unnormalized Val Loss: {val_unnormalized / len(val_loader):.3f}"
     )
 
-    # Save best model
-    if avg_val_loss < best_val_loss:
-        best_val_loss = avg_val_loss
-        torch.save(model.state_dict(), os.path.join(train_dir, "best_model.pth"))
+    normalization_stats = {
+        "data_mean": train_ds.mean,
+        "data_std": train_ds.std,
+        "labels_mean": train_ds.mean_labels,
+        "labels_std": train_ds.std_labels,
+    }
 
-# Plot loss curves
-plt.figure()
-plt.plot(train_losses, label="Train Loss")
-plt.plot(
-    [i * len(train_loader) for i in range(1, num_epochs + 1)],
-    val_losses,
-    label="Val Loss",
-    marker="o",
-)
-plt.xlabel("Iterations")
-plt.ylabel("Loss")
-plt.legend()
-plt.title("Loss Curves")
-plt.savefig(os.path.join(train_dir, "loss_curve.png"))
-plt.close()
-
-print(
-    f"Training complete. Best Val Loss: {best_val_loss:.3f}, Best Unnormalized Val Loss: {val_unnormalized / len(val_loader):.3f}"
-)
+    with open(os.path.join(train_dir, "preprocessing_stats.json"), "w") as f:
+        json.dump(normalization_stats, f, indent=4)

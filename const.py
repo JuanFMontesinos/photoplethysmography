@@ -1,3 +1,5 @@
+# const.py
+
 TRAIN_PATH  = "/mnt/DataNMVE/hilo/train.csv"
 TEST_PATH = "/mnt/DataNMVE/hilo/test.csv"
 LABELS_PATH = "/mnt/DataNMVE/hilo/train_labels.csv"
