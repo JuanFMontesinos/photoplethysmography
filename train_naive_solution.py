@@ -158,6 +158,7 @@ if __name__ == "__main__":
         model.eval()
         val_running = 0.0
         val_unnormalized = 0.0
+        errors = []
         with torch.no_grad():
             for i, (ts, feats, gt) in enumerate(val_loader, 1):
                 ts, feats, gt = ts.to(DEVICE), feats.to(DEVICE), gt.to(DEVICE)
@@ -168,13 +169,16 @@ if __name__ == "__main__":
                 preds = preds * train_ds.std_labels + train_ds.mean_labels
                 gt = gt * train_ds.std_labels + train_ds.mean_labels
 
+                error = (preds - gt)
+                errors.append(error)
                 v_loss_un = (preds - gt).abs().mean()
                 val_unnormalized += v_loss_un.item()
                 if i % 25 == 0:
                     print(
                         f"Epoch {epoch} Val Iter {i}/{len(val_loader)} - Val L1: {v_loss.item():.3f}, Val Unnormalized L1: {v_loss_un.item():.3f}"
                     )
-
+        errors = torch.stack(errors).flatten()
+        
         avg_val_loss = val_running / len(val_loader)
         avg_val_unnormalized = val_unnormalized / len(val_loader)
         val_losses.append(avg_val_loss)
@@ -184,18 +188,25 @@ if __name__ == "__main__":
 
         # Save best model
         if avg_val_unnormalized < best_val_loss:
+            best_val_error_dist = errors.flatten()
             best_val_loss = avg_val_unnormalized
             torch.save(model.state_dict(), os.path.join(train_dir, "best_model.pth"))
 
     # Plot loss curves
     plt.figure()
     plt.plot(train_losses, label="Train Loss")
+    print(error.mean(), error.std())
     plt.plot(
         [i * len(train_loader) for i in range(1, num_epochs + 1)],
         val_losses,
         label="Val Loss",
         marker="o",
     )
+    plt.figure()
+    plt.hist(best_val_error_dist.cpu().numpy(), bins=50, alpha=0.7, label="Val Error Distribution")
+    plt.xlabel("Error")
+    plt.ylabel("Frequency")
+    plt.savefig(os.path.join(train_dir, "val_error_distribution.png"))
     plt.xlabel("Iterations")
     plt.ylabel("Loss")
     plt.legend()
