@@ -22,7 +22,6 @@ import matplotlib.pyplot as plt
 torch.set_float32_matmul_precision("high")
 import dataset
 
-
 def conv_block(
     in_channels,
     out_channels,
@@ -110,7 +109,8 @@ DEVICE = "cuda"
 BATCH_SIZE = 32
 # =================================================================================
 if __name__ == "__main__":
-
+    torch.cuda.manual_seed(1995)
+    torch.manual_seed(1995)
     train_ds = dataset.BaseDataset(train=True, device=DEVICE)
     val_ds = dataset.BaseDataset(train=False, device=DEVICE)
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)

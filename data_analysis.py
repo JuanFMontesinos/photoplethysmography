@@ -85,8 +85,7 @@ for i in np.random.randint(0, ts_arr.shape[0], 10):
     plt.ylabel("Value")
     plt.savefig(f"plots/ts_plot_{i}.png")
     plt.close()
-    raw = ts_arr[i]
-    filt = highpass_filter_ppg(raw, fs=C.SR)
+    filt = highpass_filter_ppg(ts_arr[i], fs=C.SR)
 
     plt.figure(figsize=(10, 5))
     plt.plot(x_axis, filt)
